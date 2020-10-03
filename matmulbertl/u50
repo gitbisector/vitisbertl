@@ -1,0 +1,2 @@
+make all TARGET=hw DEVICE=xilinx_u50_gen3x4_xdma_2_202010_1
+
