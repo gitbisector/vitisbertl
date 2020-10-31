@@ -1,56 +1,76 @@
 #include "ap_axi_sdata.h"
 #include "ap_int.h"
+#include "ap_fixed.h"
 #include "hls_stream.h"
 #include "qop.h"
 
-extern "C" {
 
+
+v_arr
+convWo(v_dt W) {
+	#pragma HLS inline
+	v_arr Wo;
+	for(int i=0; i < VDATA_SIZE; i++)
+		Wo.data[i] = W.data[i];
+	return Wo;
+}
+
+extern "C" {
 void
 qop(
-	hls::stream<v_arr> &inW_s0,
+    const v_dt *inW,            // Read-Only Weights
 	hls::stream<v_arr> &inV_s,
-	hls::stream<v_arr> &inW_s1,
-	hls::stream<It> &o_s
+	hls::stream<ap_axiu<Itsize,0,0,0> > &o_s
 )
 {
-#pragma HLS INTERFACE axis register_mode=both register port=inW_s0
+	v_dt iW;
+	v_arr W[Mopers/VDATA_SIZE];
+	v_arr inV[Mopers/VDATA_SIZE][Veclen][(Tsize/Mopers)/cores];
+	It res;
+
+#pragma HLS INTERFACE m_axi port = inW offset = slave bundle = gmem0 max_read_burst_length=128 max_write_burst_length=128
 #pragma HLS INTERFACE axis port=inV_s
 #pragma HLS INTERFACE axis register_mode=both register port=o_s
-#pragma HLS INTERFACE axis register_mode=both register port=inW_s1
+#pragma HLS allocation instances=fmul limit=128 operation
+#pragma HLS allocation instances=fadd limit=128 operation
+#pragma HLS allocation instances=mul  limit=128 operation
+#pragma HLS allocation instances=hmul limit=128 operation
+#pragma HLS allocation instances=hadd limit=128 operation
+#pragma HLS resource core=RAM_S2P_BRAM variable=inV
+#pragma HLS array_partition variable=inW dim=1
+#pragma HLS array_partition variable=inV dim=1
+#pragma HLS array_partition variable=inV dim=4
+#pragma HLS array_partition variable=W dim=1
 
-#pragma HLS interface ap_ctrl_none port=return
+#pragma HLS INTERFACE s_axilite bundle = control port = inW
+#pragma HLS INTERFACE s_axilite bundle = control port = return
 
-	v_arr inW[2];
-	v_arr inV[Veclen*2][2];
-	It res;
-	int vofs;
-
-	#pragma HLS resource core=RAM_S2P_BRAM variable=inV
-	#pragma HLS array_partition variable=inW dim=1
-	#pragma HLS array_partition variable=inV dim=2
-	#pragma HLS array_partition variable=inV dim=3
-	#pragma HLS allocation instances=fmul limit=32 operation
-	#pragma HLS allocation instances=fadd limit=31 operation
-	#pragma HLS allocation instances=mul  limit=32 operation
-	#pragma HLS allocation instances=hmul limit=32 operation
-	#pragma HLS allocation instances=hadd limit=31 operation
-
-	for(int v = 0; v < Veclen*(Msize/VDATA_SIZE); v++) {
-		#pragma HLS pipeline II=1
-		inV_s.read(inV[v][0]);
-		inV_s.read(inV[v][1]);
+	for(int v = 0; v < Veclen; v++) {
+		for(int iter = 0; iter < (Tsize/Mopers)/cores; iter++) {
+			for(int b = 0; b < Mopers/VDATA_SIZE; b++) {
+				#pragma HLS pipeline II=1
+				inV_s.read(inV[b][v][iter]);
+			}
+		}
 	}
 
-	weightloop: for(int iter = 0; iter < (Tsize*Tsize*3)/(cores*VDATA_SIZE); iter++) {
+	weightloop: for(int iter = 0; iter < ((Tsize*Tsize*Nmat)/Mopers)/cores; iter++) {
 		#pragma HLS pipeline II=14
-		inW_s0.read(inW[0]);
-		inW_s1.read(inW[1]);
-		vofs = Veclen * (iter%(Msize/VDATA_SIZE));
+		for(int z = 0; z < Mopers/VDATA_SIZE; z++) {
+			iW = inW[iter*(Mopers/VDATA_SIZE)+z];
+			W[z] = convWo(iW);
+		}
 		for(int v = 0; v < Veclen; v++) {
-			l3:for(int k = 0 ; k < VDATA_SIZE; k++) {
-				res = ((k==0)?(It)0:res)+ (inW[0].data[k] * inV[v+vofs][0].data[k]) + (inW[1].data[k] * inV[v+vofs][1].data[k]);
+			l4: for(int b = 0; b < Mopers/VDATA_SIZE; b++) {
+				v_arr x;
+				x = inV[b][v][iter % ((Tsize/Mopers)/cores)];
+				l3:for(int k = 0 ; k < VDATA_SIZE; k++) {
+					res = (((k==0) && (b==0))?(It)0:res) + (Dt)(W[b].data[k] * x.data[k]);
+				}
 			}
-			o_s.write(res);
+			ap_axiu<Itsize,0,0,0> o_s_v;
+			o_s_v.data = res;
+			o_s.write(o_s_v);
 		}
 	}
 }

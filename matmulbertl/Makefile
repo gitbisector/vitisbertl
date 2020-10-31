@@ -95,12 +95,9 @@ EMU_DIR = $(SDCARD)/data/emulation
 ############################## Declaring Binary Containers ##############################
 BINARY_CONTAINERS += $(BUILD_DIR)/krnl_matmulbertl.xclbin
 BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/control.xo
-BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/add4t.xo
-BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/add16t.xo
 BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/qop.xo
 BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/wb.xo
-BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/mux4.xo
-BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/mux8.xo
+BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/softmax.xo
 
 ############################## Setting Targets ##############################
 CP = cp -rf
@@ -118,6 +115,9 @@ build: check-vitis $(BINARY_CONTAINERS)
 xclbin: build
 
 ############################## Setting Rules for Binary Containers (Building Kernels) ##############################
+$(TEMP_DIR)/softmax.xo: src/softmax.cpp
+	mkdir -p $(TEMP_DIR)
+	$(VPP) -c -k softmax $(CLFLAGS) --temp_dir $(TEMP_DIR)  -I'$(<D)' -o'$@' '$<'
 $(TEMP_DIR)/control.xo: src/control.cpp
 	mkdir -p $(TEMP_DIR)
 	$(VPP) -c -k control $(CLFLAGS) --temp_dir $(TEMP_DIR)  -I'$(<D)' -o'$@' '$<'

@@ -1,20 +1,20 @@
 #define VDATA_SIZE 16
 
-typedef signed short Dt;
-typedef ap_int<32> It;
+typedef ap_fixed<16, 0> Dt;
+
+#define Itsize 32
+typedef ap_fixed<32, 16> It;
+
 typedef struct v_datatype { Dt data[VDATA_SIZE]; } v_dt;
+typedef struct v_inWrrtype{	Dt data[VDATA_SIZE]; } v_arr;
+typedef struct v_wbtype{	It data[VDATA_SIZE]; } wb_arr;
 
 enum {
-	mems = 16,
-	cores = 64,
+	cores = 1,
 	Tp2 = 10,
+	Mopers = VDATA_SIZE * 8,
 	Tsize = 1<<Tp2,             /* 1024 */
-	Msize = (Tsize/cores),      /* 16 */
-	Vsize = Msize/VDATA_SIZE,   /* 1 */
-	Vshift = 2,
+	Nmat = 3,
 	Veclen = 14,
 };
 
-typedef struct v_inWrrtype{
-	Dt data[Msize];
-} v_arr;

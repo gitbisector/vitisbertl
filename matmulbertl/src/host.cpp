@@ -19,6 +19,26 @@ const int bank[MAX_HBM_BANKCOUNT] = {
     BANK_NAME(25), BANK_NAME(26), BANK_NAME(27), BANK_NAME(28), BANK_NAME(29),
     BANK_NAME(30), BANK_NAME(31)};
 
+enum {
+  Nk = 1,
+  Wr = 3*1024,
+  Wc = 1024,
+  Vr = 1024,
+  Vc = 14,
+};
+
+int swres[Wr][Vc];
+
+void
+swmatmul(std::vector<signed short, aligned_allocator<signed short> > &W, std::vector<signed short, aligned_allocator<signed short> >&V)
+{
+  memset(swres, 0, sizeof(swres));
+  for(int r = 0; r < Wr; r++)
+    for(int c = 0; c < Vc; c++)
+      for(int k = 0; k < Wc; k++)
+        swres[r][c] += (W[r*Wr+k] * V[k+c*Vr]) >> 16;
+}
+
 int main(int argc, char *argv[]) {
   if (argc != 2) {
     printf("Usage: %s <XCLBIN> \n", argv[0]);
@@ -38,23 +58,26 @@ int main(int argc, char *argv[]) {
 
   std::string binaryFile = argv[1];
   cl_int err;
-  cl::CommandQueue q[2];
+  cl::CommandQueue q[2+Nk];
   cl::Kernel krnl_control;
+  cl::Kernel krnl_qop[Nk];
   cl::Kernel krnl_wb;
   cl::Context context;
-  std::vector<float, aligned_allocator<float>> source_w[16];
-  std::vector<float, aligned_allocator<float>> source_v(sizeof(signed short)*14*1024);
-  std::vector<float, aligned_allocator<float>> source_hw_wb_results(sizeof(signed short)*14*1024);
+  std::vector<signed short, aligned_allocator<signed short>> source_w[Nk];
+  std::vector<signed short, aligned_allocator<signed short>> source_v(sizeof(signed short)*14*1024);
+  std::vector<int, aligned_allocator<int>> source_hw_wb_results(sizeof(int)*3*14*1024);
 
-  for(int i = 0; i < 16; i++) {
-    source_w[i].resize(sizeof(signed short)*3*1024*1024/16);
+  for(int i = 0; i < Nk; i++) {
+    source_w[i].resize(sizeof(signed short)*3*1024*1024/Nk);
   }
 
   // Create the test data
-  for(int i = 0; i < 16; i++) {
+  for(int i = 0; i < Nk; i++) {
     std::generate(source_w[i].begin(), source_w[i].end(), std::rand);
   }
   std::generate(source_v.begin(), source_v.end(), std::rand);
+
+  swmatmul(source_w[0], source_v);
 
   // Initializing output vectors to zero
   std::fill(source_hw_wb_results.begin(), source_hw_wb_results.end(), 0);
@@ -72,7 +95,7 @@ int main(int argc, char *argv[]) {
     auto device = devices[i];
     // Creating Context and Command Queue for selected Device
     OCL_CHECK(err, context = cl::Context(device, NULL, NULL, NULL, &err));
-    for(int i = 0; i < 2; i++) {
+    for(int i = 0; i < 2+Nk; i++) {
       OCL_CHECK(err, q[i] = cl::CommandQueue(context, device,
                                         CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE |
                                             CL_QUEUE_PROFILING_ENABLE,
@@ -91,6 +114,10 @@ int main(int argc, char *argv[]) {
       printf("Creating a kernel [%s] for CU\n", krnl_name_control.c_str());
       OCL_CHECK(err, krnl_control = cl::Kernel(program, krnl_name_control.c_str(), &err));
 
+      std::string krnl_name_qop = "qop:{qop_1}";
+      printf("Creating a kernel [%s] for CU\n", krnl_name_qop.c_str());
+      OCL_CHECK(err, krnl_qop[0] = cl::Kernel(program, krnl_name_qop.c_str(), &err));
+
       std::string krnl_name_wb = "wb:{wb_1}";
       printf("Creating a kernel [%s] for CU\n", krnl_name_wb.c_str());
       OCL_CHECK(err, krnl_wb = cl::Kernel(program, krnl_name_wb.c_str(), &err));
@@ -103,18 +130,18 @@ int main(int argc, char *argv[]) {
     exit(EXIT_FAILURE);
   }
 
-  std::vector<cl_mem_ext_ptr_t> inBufExtw(16);
+  std::vector<cl_mem_ext_ptr_t> inBufExtw(Nk);
   std::vector<cl_mem_ext_ptr_t> inBufExtv(1);
   std::vector<cl_mem_ext_ptr_t> outBufExtwb(1);
 
-  std::vector<cl::Buffer> buffer_inputw(16);
+  std::vector<cl::Buffer> buffer_inputw(Nk);
   std::vector<cl::Buffer> buffer_inputv(1);
   std::vector<cl::Buffer> buffer_output_wb(1);
 
   // For Allocating Buffer to specific Global Memory Bank, user has to use
   // cl_mem_ext_ptr_t
   // and provide the Banks
-  for(int i = 0; i < 16; i++) {
+  for(int i = 0; i < Nk; i++) {
     inBufExtw[i].obj = source_w[i].data();
     inBufExtw[i].param = 0;
     inBufExtw[i].flags = bank[i * 2];
@@ -130,11 +157,11 @@ int main(int argc, char *argv[]) {
 
   // These commands will allocate memory on the FPGA and copy the data across
   // The cl::Buffer objects can be used to reference the memory locations on the device.
-  // The Weights are spread across 16 even-numbered HBM banks and vector lives in bank 15.
-  for(int i = 0; i < 16; i++) {
+  // The Weights are spread across Nk even-numbered HBM banks and vector lives in bank 31.
+  for(int i = 0; i < Nk; i++) {
     OCL_CHECK(err, buffer_inputw[i] = cl::Buffer(
                       context, CL_MEM_READ_ONLY | CL_MEM_EXT_PTR_XILINX | CL_MEM_USE_HOST_PTR,
-                      sizeof(signed short) * 3 * 1024 * 1024/16, &inBufExtw[i], &err));
+                      sizeof(signed short) * 3 * 1024 * 1024/Nk, &inBufExtw[i], &err));
     OCL_CHECK(err, err = q[0].enqueueMigrateMemObjects({buffer_inputw[i]}, 0 /* 0 means from host*/));
   }
   OCL_CHECK(err, buffer_inputv[0] = cl::Buffer(
@@ -144,7 +171,7 @@ int main(int argc, char *argv[]) {
 
   OCL_CHECK(err, buffer_output_wb[0] = cl::Buffer(
                       context, CL_MEM_WRITE_ONLY | CL_MEM_EXT_PTR_XILINX | CL_MEM_USE_HOST_PTR,
-                      sizeof(signed short) * 1024 * 14, &outBufExtwb[0], &err));
+                      sizeof(int) * 3 * 1024 * 14, &outBufExtwb[0], &err));
   OCL_CHECK(err, err = q[0].enqueueMigrateMemObjects({buffer_output_wb[0]}, 0 /* 0 means from host*/));
   // Copy input data to Device Global Memory
   q[0].finish();
@@ -157,16 +184,23 @@ int main(int argc, char *argv[]) {
   std::chrono::duration<double> kernel_time(0);
   auto kernel_start = std::chrono::high_resolution_clock::now();
   // Setting the control Arguments
-  for(int i = 0; i < 16; i++) {
-    OCL_CHECK(err, err = krnl_control.setArg(i, buffer_inputw[i]));
-  }
-  OCL_CHECK(err, err = krnl_control.setArg(16, buffer_inputv[0]));
+  OCL_CHECK(err, err = krnl_control.setArg(0, buffer_inputv[0]));
 
+  // Setting the qop kernel Arguments
+  for(int i = 0; i < Nk; i++) {
+    OCL_CHECK(err, err = krnl_qop[i].setArg(0, buffer_inputw[i]));
+  }
   
   // Invoking the kernel
   OCL_CHECK(err, err = q[0].enqueueTask(krnl_control));
   OCL_CHECK(err, err = q[1].enqueueTask(krnl_wb));
+  for(int i = 0; i <  Nk; i++) {
+    OCL_CHECK(err, err = q[2+i].enqueueTask(krnl_qop[i]));
+  }
   q[0].finish();
+  for(int i = 0; i < Nk; i++) {
+    q[2+i].finish();
+  }
   q[1].finish();
 
   auto kernel_end = std::chrono::high_resolution_clock::now();
