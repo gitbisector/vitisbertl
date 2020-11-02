@@ -13,6 +13,7 @@ enum {
 	cores = 1,
 	Tp2 = 10,
 	Mopers = VDATA_SIZE * 8,
+	MopersP2 = 7,
 	Tsize = 1<<Tp2,             /* 1024 */
 	Nmat = 3,
 	Veclen = 14,

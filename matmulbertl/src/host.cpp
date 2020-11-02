@@ -36,7 +36,7 @@ swmatmul(std::vector<signed short, aligned_allocator<signed short> > &W, std::ve
   for(int r = 0; r < Wr; r++)
     for(int c = 0; c < Vc; c++)
       for(int k = 0; k < Wc; k++)
-        swres[r][c] += (W[r*Wr+k] * V[k+c*Vr]) >> 16;
+        swres[r][c] += (W[r*Wc+k] * V[k+c*Vr]) >> 16;
 }
 
 int main(int argc, char *argv[]) {

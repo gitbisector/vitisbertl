@@ -31,14 +31,15 @@ wb(
 					i_s.read(r);
 					e = (It)r.data;
 					psums[v][k] = ((piter==0)?(It)0:psums[k]) + e;
+
+					if((k == VDATA_SIZE-1) && (piter==8/cores-1)) {
+						for(int k=0; k < VDATA_SIZE; k++) {
+							V.data[k] = psums[v][k] >> shift;
+						}
+						o_tensor[i*Veclen+v] = V;
+					}
 				}
 			}
-		}
-		for(int v=0; v < Veclen; v++) {
-			for(int k=0; k < VDATA_SIZE; k++) {
-				V.data[k] = psums[v][k] >> shift;
-			}
-			o_tensor[i*Veclen+v] = V;
 		}
 	}
 }
