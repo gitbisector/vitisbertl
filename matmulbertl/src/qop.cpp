@@ -3,10 +3,9 @@
 #include "ap_fixed.h"
 #include "hls_stream.h"
 #include "qop.h"
+#include <iostream>
 
-
-
-v_arr
+static v_arr
 convWo(v_dt W) {
 	#pragma HLS inline
 	v_arr Wo;
@@ -15,7 +14,18 @@ convWo(v_dt W) {
 	return Wo;
 }
 
-void
+static v_arr
+convV(ap_axiu<256,0,0,0> W) {
+	#pragma HLS inline
+	v_arr Wo;
+//	std::cout << std::hex << W.data << std::endl;
+	for(int i=0; i < VDATA_SIZE; i++) {
+		Wo.data[i](Wo.data[0].width-1,0) = W.data(Wo.data[0].width*(i+1)-1, Wo.data[0].width*i);
+	}
+	return Wo;
+}
+
+template <int lalala> void
 rmem(int iter, const v_dt *inW, v_arr W[Mopers/VDATA_SIZE])
 {
 	v_dt iW;
@@ -26,13 +36,13 @@ rmem(int iter, const v_dt *inW, v_arr W[Mopers/VDATA_SIZE])
 	}
 }
 
-void
+template <int lalala> void
 math(int iter, v_arr inV[Mopers/VDATA_SIZE][Veclen][(Tsize/Mopers)/cores], v_arr W[Mopers/VDATA_SIZE], hls::stream<ap_axiu<Itsize,0,0,0> > &o_s)
 {
 	It res;
 	It imm[MopersP2+1][Mopers];
 	#pragma HLS pipeline II=14
-	#pragma HLS array_partition variable imm dim=0
+	#pragma HLS array_partition variable=imm dim=0
 	#pragma HLS allocation instances=fmul limit=128 operation
 	#pragma HLS allocation instances=fadd limit=128 operation
 	#pragma HLS allocation instances=mul  limit=128 operation
@@ -54,6 +64,10 @@ math(int iter, v_arr inV[Mopers/VDATA_SIZE][Veclen][(Tsize/Mopers)/cores], v_arr
 		}
 		ap_axiu<Itsize,0,0,0> o_s_v;
 		o_s_v.data = imm[MopersP2][0];
+		if(imm[MopersP2][0] != 0) {
+			std::cout << (int)imm[MopersP2][0](31,0) << std::endl;
+		}
+
 		o_s.write(o_s_v);
 	}
 }
@@ -61,40 +75,66 @@ math(int iter, v_arr inV[Mopers/VDATA_SIZE][Veclen][(Tsize/Mopers)/cores], v_arr
 extern "C" {
 void
 qop(
-    const v_dt *inW,            // Read-Only Weights
-	hls::stream<v_arr> &inV_s,
-	hls::stream<ap_axiu<Itsize,0,0,0> > &o_s
+    const v_dt *inW0,            // Read-Only Weights
+    const v_dt *inW1,            // Read-Only Weights
+	hls::stream<ap_axiu<256,0,0,0> > &inV_s,
+	hls::stream<ap_axiu<Itsize,0,0,0> > &o_s0,
+	hls::stream<ap_axiu<Itsize,0,0,0> > &o_s1
 )
 {
-	v_arr W[Mopers/VDATA_SIZE];
-	v_arr inV[Mopers/VDATA_SIZE][Veclen][(Tsize/Mopers)/cores];
+	v_arr W0[Mopers/VDATA_SIZE];
+	v_arr inV0[Mopers/VDATA_SIZE][Veclen][(Tsize/Mopers)/cores];
 
-#pragma HLS INTERFACE m_axi port = inW offset = slave bundle = gmem0 max_read_burst_length=128 max_write_burst_length=128
+	v_arr W1[Mopers/VDATA_SIZE];
+	v_arr inV1[Mopers/VDATA_SIZE][Veclen][(Tsize/Mopers)/cores];
+
+	ap_axiu<256,0,0,0> inV;
+
+
+#pragma HLS INTERFACE m_axi port = inW0 offset = slave bundle = gmem0 max_read_burst_length=128 max_write_burst_length=128
+#pragma HLS INTERFACE m_axi port = inW1 offset = slave bundle = gmem1 max_read_burst_length=128 max_write_burst_length=128
 #pragma HLS INTERFACE axis port=inV_s
-#pragma HLS INTERFACE axis register_mode=both register port=o_s
+#pragma HLS INTERFACE axis register_mode=both register port=o_s0
+#pragma HLS INTERFACE axis register_mode=both register port=o_s1
 
-#pragma HLS resource core=RAM_S2P_BRAM variable=inV
-#pragma HLS array_partition variable=inW dim=1
-#pragma HLS array_partition variable=inV dim=1
-#pragma HLS array_partition variable=inV dim=4
-#pragma HLS array_partition variable=W dim=1
 
-#pragma HLS INTERFACE s_axilite bundle = control port = inW
+#pragma HLS array_partition variable=inW0 dim=1
+#pragma HLS array_partition variable=inW1 dim=1
+
+#pragma HLS resource core=RAM_S2P_BRAM variable=inV0
+#pragma HLS array_partition variable=inV0 dim=1
+#pragma HLS array_partition variable=inV0 dim=4
+
+#pragma HLS resource core=RAM_S2P_BRAM variable=inV1
+#pragma HLS array_partition variable=inV1 dim=1
+#pragma HLS array_partition variable=inV1 dim=4
+
+#pragma HLS array_partition variable=W0 dim=1
+#pragma HLS array_partition variable=W1 dim=1
+
+#pragma HLS INTERFACE s_axilite bundle = control port = inW0
+#pragma HLS INTERFACE s_axilite bundle = control port = inW1
 #pragma HLS INTERFACE s_axilite bundle = control port = return
 
 	vecloop: for(int v = 0; v < Veclen; v++) {
-		for(int iter = 0; iter < (Tsize/Mopers)/cores; iter++) {
+		for(int iter = 0; iter < ((Tsize/Mopers)/cores)/2; iter++) {
 			for(int b = 0; b < Mopers/VDATA_SIZE; b++) {
 				#pragma HLS pipeline II=1
-				inV_s.read(inV[b][v][iter]);
+				inV_s.read(inV);
+				inV0[b][v][iter] = convV(inV);
+				inV_s.read(inV);
+				inV1[b][v][iter] = convV(inV);
+//				std::cout << inV0[b][v][iter].data[0](15,0) << ", " << inV1[b][v][iter].data[0](15,0) << std::endl;		
 			}
 		}
 	}
 
 #pragma HLS dataflow
-	weightloop: for(int iter = 0; iter < ((Tsize*Tsize*Nmat)/Mopers)/cores; iter++) {
-		rmem(iter, inW, W);
-		math(iter, inV, W, o_s);
+	weightloop: for(int iter = 0; iter < ((Tsize*Tsize*Nmat)/Mopers)/cores/2; iter++) {
+		rmem<0>(iter, inW0, W0);
+		math<0>(iter, inV0, W0, o_s0);
+		rmem<1>(iter, inW1, W1);
+		math<1>(iter, inV1, W1, o_s1);
 	}
 }
 }

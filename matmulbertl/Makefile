@@ -97,7 +97,7 @@ BINARY_CONTAINERS += $(BUILD_DIR)/krnl_matmulbertl.xclbin
 BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/control.xo
 BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/qop.xo
 BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/wb.xo
-BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/softmax.xo
+#BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/softmax.xo
 
 ############################## Setting Targets ##############################
 CP = cp -rf
