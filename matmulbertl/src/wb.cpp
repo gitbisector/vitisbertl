@@ -3,7 +3,6 @@
 #include "ap_int.h"
 #include "hls_stream.h"
 #include "qop.h"
-#include <iostream>
 
 extern "C" {
 void
@@ -39,6 +38,7 @@ wb(
 
 					if((k == VDATA_SIZE-1) && (piter==8/cores/2-1)) {
 						for(int z=0; z < VDATA_SIZE; z++) {
+							#pragma HLS pipeline II=1
 							V.data[z] = psums[v][z] >> shift;
 						}
 						o_tensor[i*Veclen+v] = V;

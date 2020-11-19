@@ -3,7 +3,6 @@
 #include "ap_fixed.h"
 #include "hls_stream.h"
 #include "qop.h"
-#include <iostream>
 
 static v_arr
 convWo(v_dt W) {
@@ -64,9 +63,9 @@ math(int iter, v_arr inV[Mopers/VDATA_SIZE][Veclen][(Tsize/Mopers)/cores], v_arr
 		}
 		ap_axiu<Itsize,0,0,0> o_s_v;
 		o_s_v.data = imm[MopersP2][0];
-		if(imm[MopersP2][0] != 0) {
-			std::cout << (int)imm[MopersP2][0](31,0) << std::endl;
-		}
+//		if(imm[MopersP2][0] != 0) {
+//			std::cout << (int)imm[MopersP2][0](31,0) << std::endl;
+//		}
 
 		o_s.write(o_s_v);
 	}

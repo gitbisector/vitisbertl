@@ -151,23 +151,23 @@ main(int argc, char *argv[]) {
     inBufExtw[i].obj = source_w[i].data();
     inBufExtw[i].param = 0;
     inBufExtw[i].flags = bank[2*i];
-    if(is_sw_emulation)
-      inBufExtw[i].flags = bank[0];
+//    if(is_sw_emulation)
+//      inBufExtw[i].flags = bank[0];
   }
 
   inBufExtv[0].obj = source_v.data();
   inBufExtv[0].param = 0;
   inBufExtv[0].flags = bank[31];
-  if(is_sw_emulation) {
-    inBufExtv[0].flags = bank[0];
-  }
+//  if(is_sw_emulation) {
+//    inBufExtv[0].flags = bank[0];
+//  }
 
   outBufExtwb[0].obj = source_hw_wb_results.data();
   outBufExtwb[0].param = 0;
   outBufExtwb[0].flags = bank[31];
-  if(is_sw_emulation) {
-    outBufExtwb[0].flags = bank[0];
-  }
+//  if(is_sw_emulation) {
+//    outBufExtwb[0].flags = bank[0];
+//  }
 
   // These commands will allocate memory on the FPGA and copy the data across
   // The cl::Buffer objects can be used to reference the memory locations on the device.
@@ -214,10 +214,14 @@ main(int argc, char *argv[]) {
     OCL_CHECK(err, err = q[2+i].enqueueTask(krnl_qop[i]));
   }
   q[0].finish();
+  std::cout << "q[0] finished" << std::endl;
+
   for(int i = 0; i < Nk; i++) {
     q[2+i].finish();
+    std::cout << "q finished" << std::endl;
   }
   q[1].finish();
+  std::cout << "q[1] finished" << std::endl;
 
   auto kernel_end = std::chrono::high_resolution_clock::now();
   kernel_time = std::chrono::duration<double>(kernel_end - kernel_start);
@@ -226,6 +230,7 @@ main(int argc, char *argv[]) {
   // Copy Result from Device Global Memory to Host Local Memory
   OCL_CHECK(err, err = q[0].enqueueMigrateMemObjects({buffer_output_wb[0]}, CL_MIGRATE_MEM_OBJECT_HOST));
   q[0].finish();
+  std::cout << "readback finished" << std::endl;
 
   std::cout << "kernel time = " << (kernel_time_in_sec*1000000) << " us" << std::endl;
   // OPENCL HOST CODE AREA ENDS

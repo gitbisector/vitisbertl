@@ -2,7 +2,6 @@
 #include "ap_int.h"
 #include "hls_stream.h"
 #include "qop.h"
-#include <iostream>
 
 static ap_axiu<256,0,0,0>
 convWo(v_dt W) {
