@@ -3,20 +3,21 @@
 #include "hls_stream.h"
 #include "qop.h"
 
-v_arr
+static ap_axiu<256,0,0,0>
 convWo(v_dt W) {
 	#pragma HLS inline
-	v_arr Wo;
-	for(int i=0; i < VDATA_SIZE; i++)
-		Wo.data[i] = W.data[i];
+	ap_axiu<256,0,0,0> Wo;
+	for(int i=0; i < VDATA_SIZE; i++) {
+		Wo.data(W.data[0].width*(i+1)-1, W.data[0].width*i) = W.data[i](W.data[0].width-1, 0);
+	}
 	return Wo;
 }
 
-void
+static void
 controlsubv(
-	    const v_dt *in_tensor,           // Read-only tensor (1024, 14)
-		hls::stream<v_arr> &ov00_s
-		)
+	const v_dt *in_tensor,           // Read-only tensor (1024, 14)
+	hls::stream<ap_axiu<256,0,0,0>> &ov00_s
+	)
 {
 	v_dt W;
 	for(int i=0; i < (Tsize*Veclen)/VDATA_SIZE; i++) {
@@ -29,7 +30,7 @@ extern "C" {
 void
 control(
 	    const v_dt *in_tensor,           // Read-only tensor (1024, 14)
-		hls::stream<v_arr> &ov00_s
+		hls::stream<ap_axiu<256,0,0,0> > &ov00_s
 	    )
 {
 	#pragma HLS INTERFACE m_axi port = in_tensor offset = slave bundle = gmem16 

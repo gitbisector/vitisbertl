@@ -21,6 +21,7 @@ const int bank[MAX_HBM_BANKCOUNT] = {
 
 enum {
   Nk = 1,
+  Npk = 1,
   Wr = 3*1024,
   Wc = 1024,
   Vr = 1024,
@@ -39,14 +40,14 @@ swmatmul(std::vector<signed short, aligned_allocator<signed short> > &W, std::ve
         swres[r][c] += (W[r*Wc+k] * V[k+c*Vr]) >> 16;
 }
 
-int main(int argc, char *argv[]) {
+int
+main(int argc, char *argv[]) {
   if (argc != 2) {
     printf("Usage: %s <XCLBIN> \n", argv[0]);
     return -1;
   }
 
-  if (xcl::is_emulation()) {
-  }
+  int is_sw_emulation = xcl::is_emulation() && (!xcl::is_hw_emulation());
 
   /* Allocate space in each one of 16 HBM banks */
   /* Load (3072,1024) weights into HBM in Device Global memory*/
@@ -63,21 +64,25 @@ int main(int argc, char *argv[]) {
   cl::Kernel krnl_qop[Nk];
   cl::Kernel krnl_wb;
   cl::Context context;
-  std::vector<signed short, aligned_allocator<signed short>> source_w[Nk];
+  std::vector<signed short, aligned_allocator<signed short>> source_w[Nk*Npk];
   std::vector<signed short, aligned_allocator<signed short>> source_v(sizeof(signed short)*14*1024);
   std::vector<int, aligned_allocator<int>> source_hw_wb_results(sizeof(int)*3*14*1024);
 
-  for(int i = 0; i < Nk; i++) {
-    source_w[i].resize(sizeof(signed short)*3*1024*1024/Nk);
+  for(int i = 0; i < Nk*Npk; i++) {
+    source_w[i].resize(sizeof(signed short)*3*1024*1024/Nk/Npk);
   }
 
   // Create the test data
-  for(int i = 0; i < Nk; i++) {
-    std::generate(source_w[i].begin(), source_w[i].end(), std::rand);
+  for(int i = 0; i < Nk*Npk; i++) {
+    std::fill(source_w[i].begin(), source_w[i].end(), 0);
+    //std::generate(source_w[i].begin(), source_w[i].end(), std::rand);
   }
-  std::generate(source_v.begin(), source_v.end(), std::rand);
 
-  swmatmul(source_w[0], source_v);
+  std::fill(source_v.begin(), source_v.end(), 18000);
+  //std::generate(source_v.begin(), source_v.end(), std::rand);
+
+  source_w[0][10] = 32000;
+  source_w[0][1024+11] = 16000;
 
   // Initializing output vectors to zero
   std::fill(source_hw_wb_results.begin(), source_hw_wb_results.end(), 0);
@@ -130,38 +135,46 @@ int main(int argc, char *argv[]) {
     exit(EXIT_FAILURE);
   }
 
-  std::vector<cl_mem_ext_ptr_t> inBufExtw(Nk);
+  std::vector<cl_mem_ext_ptr_t> inBufExtw(Nk*Npk);
   std::vector<cl_mem_ext_ptr_t> inBufExtv(1);
   std::vector<cl_mem_ext_ptr_t> outBufExtwb(1);
 
-  std::vector<cl::Buffer> buffer_inputw(Nk);
+  std::vector<cl::Buffer> buffer_inputw(Nk*Npk);
   std::vector<cl::Buffer> buffer_inputv(1);
   std::vector<cl::Buffer> buffer_output_wb(1);
 
   // For Allocating Buffer to specific Global Memory Bank, user has to use
   // cl_mem_ext_ptr_t
   // and provide the Banks
-  for(int i = 0; i < Nk; i++) {
+  for(int i = 0; i < Nk*Npk; i++) {
     inBufExtw[i].obj = source_w[i].data();
     inBufExtw[i].param = 0;
-    inBufExtw[i].flags = bank[i * 2];
+    inBufExtw[i].flags = bank[2*i];
+    if(is_sw_emulation)
+      inBufExtw[i].flags = bank[0];
   }
 
   inBufExtv[0].obj = source_v.data();
   inBufExtv[0].param = 0;
   inBufExtv[0].flags = bank[31];
+  if(is_sw_emulation) {
+    inBufExtv[0].flags = bank[0];
+  }
 
   outBufExtwb[0].obj = source_hw_wb_results.data();
   outBufExtwb[0].param = 0;
   outBufExtwb[0].flags = bank[31];
+  if(is_sw_emulation) {
+    outBufExtwb[0].flags = bank[0];
+  }
 
   // These commands will allocate memory on the FPGA and copy the data across
   // The cl::Buffer objects can be used to reference the memory locations on the device.
   // The Weights are spread across Nk even-numbered HBM banks and vector lives in bank 31.
-  for(int i = 0; i < Nk; i++) {
+  for(int i = 0; i < Nk*Npk; i++) {
     OCL_CHECK(err, buffer_inputw[i] = cl::Buffer(
                       context, CL_MEM_READ_ONLY | CL_MEM_EXT_PTR_XILINX | CL_MEM_USE_HOST_PTR,
-                      sizeof(signed short) * 3 * 1024 * 1024/Nk, &inBufExtw[i], &err));
+                      sizeof(signed short) * 3 * 1024 * 1024/Nk/Npk, &inBufExtw[i], &err));
     OCL_CHECK(err, err = q[0].enqueueMigrateMemObjects({buffer_inputw[i]}, 0 /* 0 means from host*/));
   }
   OCL_CHECK(err, buffer_inputv[0] = cl::Buffer(
@@ -188,9 +201,11 @@ int main(int argc, char *argv[]) {
 
   // Setting the qop kernel Arguments
   for(int i = 0; i < Nk; i++) {
-    OCL_CHECK(err, err = krnl_qop[i].setArg(0, buffer_inputw[i]));
+    for(int j = 0; j < Npk; j++) {
+      OCL_CHECK(err, err = krnl_qop[i].setArg(j, buffer_inputw[i*Npk+j]));
+    }
   }
-  
+
   // Invoking the kernel
   OCL_CHECK(err, err = q[0].enqueueTask(krnl_control));
   OCL_CHECK(err, err = q[1].enqueueTask(krnl_wb));
@@ -198,10 +213,14 @@ int main(int argc, char *argv[]) {
     OCL_CHECK(err, err = q[2+i].enqueueTask(krnl_qop[i]));
   }
   q[0].finish();
+  std::cout << "q[0] finished" << std::endl;
+
   for(int i = 0; i < Nk; i++) {
     q[2+i].finish();
+    std::cout << "q finished" << std::endl;
   }
   q[1].finish();
+  std::cout << "q[1] finished" << std::endl;
 
   auto kernel_end = std::chrono::high_resolution_clock::now();
   kernel_time = std::chrono::duration<double>(kernel_end - kernel_start);
@@ -210,9 +229,16 @@ int main(int argc, char *argv[]) {
   // Copy Result from Device Global Memory to Host Local Memory
   OCL_CHECK(err, err = q[0].enqueueMigrateMemObjects({buffer_output_wb[0]}, CL_MIGRATE_MEM_OBJECT_HOST));
   q[0].finish();
+  std::cout << "readback finished" << std::endl;
 
   std::cout << "kernel time = " << (kernel_time_in_sec*1000000) << " us" << std::endl;
   // OPENCL HOST CODE AREA ENDS
+
+  for(int i=0; i < Wr*Vc; i++) {
+    if(source_hw_wb_results[i] != 0) {
+      std::cout << "i = " << i << "; v = " << source_hw_wb_results[i] << std::endl;
+    }
+  }
 
   int match = 1;
   /* Need to do some verification of the result*/
