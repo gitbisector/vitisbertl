@@ -17,5 +17,8 @@ enum {
 	Tsize = 1<<Tp2,             /* 1024 */
 	Nmat = 3,
 	Veclen = 14,
-};
 
+	Mempaths = 8,
+	Qop_paths = 8,
+	Qop_pathsP2 = 3,
+};

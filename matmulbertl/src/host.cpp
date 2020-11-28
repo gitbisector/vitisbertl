@@ -21,7 +21,7 @@ const int bank[MAX_HBM_BANKCOUNT] = {
 
 enum {
   Nk = 1,
-  Npk = 1,
+  Npk = 8,
   Wr = 3*1024,
   Wc = 1024,
   Vr = 1024,
@@ -49,19 +49,17 @@ main(int argc, char *argv[]) {
 
   int is_sw_emulation = xcl::is_emulation() && (!xcl::is_hw_emulation());
 
-  /* Allocate space in each one of 16 HBM banks */
+  /* Allocate space in each one of 9 HBM banks */
   /* Load (3072,1024) weights into HBM in Device Global memory*/
 
   /* Load (1024,14) vector from Host Local into separate HBM in Device Global memory */
-  /* Run both control_1() and wb_1() kernels */
+  /* Run both feeder_1() and wb_1() kernels */
   /* Load (1024,14) results vector from Device Global memory back to Host Local */
-
 
   std::string binaryFile = argv[1];
   cl_int err;
-  cl::CommandQueue q[2+Nk];
-  cl::Kernel krnl_control;
-  cl::Kernel krnl_qop[Nk];
+  cl::CommandQueue q[2];
+  cl::Kernel krnl_feeder;
   cl::Kernel krnl_wb;
   cl::Context context;
   std::vector<signed short, aligned_allocator<signed short>> source_w[Nk*Npk];
@@ -115,13 +113,9 @@ main(int argc, char *argv[]) {
       std::cout << "Device[" << i << "]: program successful!\n";
       // Creating Kernel object using Compute unit names
 
-      std::string krnl_name_control = "control:{control_1}";
-      printf("Creating a kernel [%s] for CU\n", krnl_name_control.c_str());
-      OCL_CHECK(err, krnl_control = cl::Kernel(program, krnl_name_control.c_str(), &err));
-
-      std::string krnl_name_qop = "qop:{qop_1}";
-      printf("Creating a kernel [%s] for CU\n", krnl_name_qop.c_str());
-      OCL_CHECK(err, krnl_qop[0] = cl::Kernel(program, krnl_name_qop.c_str(), &err));
+      std::string krnl_name_feeder = "feeder:{feeder_1}";
+      printf("Creating a kernel [%s] for CU\n", krnl_name_feeder.c_str());
+      OCL_CHECK(err, krnl_feeder = cl::Kernel(program, krnl_name_feeder.c_str(), &err));
 
       std::string krnl_name_wb = "wb:{wb_1}";
       printf("Creating a kernel [%s] for CU\n", krnl_name_wb.c_str());
@@ -196,29 +190,19 @@ main(int argc, char *argv[]) {
   double kernel_time_in_sec = 0;
   std::chrono::duration<double> kernel_time(0);
   auto kernel_start = std::chrono::high_resolution_clock::now();
-  // Setting the control Arguments
-  OCL_CHECK(err, err = krnl_control.setArg(0, buffer_inputv[0]));
-
-  // Setting the qop kernel Arguments
+  // Setting the feeder Arguments
+  OCL_CHECK(err, err = krnl_feeder.setArg(0, buffer_inputv[0]));
   for(int i = 0; i < Nk; i++) {
     for(int j = 0; j < Npk; j++) {
-      OCL_CHECK(err, err = krnl_qop[i].setArg(j, buffer_inputw[i*Npk+j]));
+      OCL_CHECK(err, err = krnl_feeder.setArg(1+i*Npk+j, buffer_inputw[i*Npk+j]));
     }
   }
 
   // Invoking the kernel
-  OCL_CHECK(err, err = q[0].enqueueTask(krnl_control));
+  OCL_CHECK(err, err = q[0].enqueueTask(krnl_feeder));
   OCL_CHECK(err, err = q[1].enqueueTask(krnl_wb));
-  for(int i = 0; i <  Nk; i++) {
-    OCL_CHECK(err, err = q[2+i].enqueueTask(krnl_qop[i]));
-  }
   q[0].finish();
   std::cout << "q[0] finished" << std::endl;
-
-  for(int i = 0; i < Nk; i++) {
-    q[2+i].finish();
-    std::cout << "q finished" << std::endl;
-  }
   q[1].finish();
   std::cout << "q[1] finished" << std::endl;
 
@@ -245,3 +229,4 @@ main(int argc, char *argv[]) {
   std::cout << (match ? "TEST PASSED" : "TEST FAILED") << std::endl;
   return (match ? EXIT_SUCCESS : EXIT_FAILURE);
 }
+

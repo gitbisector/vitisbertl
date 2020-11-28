@@ -27,7 +27,7 @@ wb(
 
 	l_a: for(int i=0; i < Nmat*Tsize/VDATA_SIZE; i++) {
 		l_b: for(int k=0; k < VDATA_SIZE; k++) {
-			l_c: for(int piter=0; piter < 8/cores; piter++) {
+			l_c: for(int piter=0; piter < (8/cores)/Qop_paths; piter++) {
 				l_d: for(int v=0; v < Veclen; v++) {
 					i_s0.read(r);
 					e(e.width-1,0) = r.data(e.width-1,0);
@@ -35,7 +35,7 @@ wb(
 					if(e != (It)0)
 						std::cout << (int)e(31,0) << std::endl;
 
-					if((k == VDATA_SIZE-1) && (piter==8/cores-1)) {
+					if((k == VDATA_SIZE-1) && (piter==(8/cores)/Qop_paths-1)) {
 						l_e: for(int m=0; m < VDATA_SIZE; m++) {
 							V.data[m] = (psums[v][m] + ((m==k)?e:(It)0)) >> shift;
 							psums[v][m] = 0;
@@ -50,3 +50,4 @@ wb(
 	}
 }
 }
+
