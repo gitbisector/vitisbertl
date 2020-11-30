@@ -1,4 +1,5 @@
 #define VDATA_SIZE 16
+#define VDATA_SIZEP2 4
 
 typedef ap_fixed<16, 0> Dt;
 

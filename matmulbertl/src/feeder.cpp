@@ -1,67 +1,65 @@
 #include "ap_axi_sdata.h"
-#define AP_INT_MAX_W 2048
 #include "ap_int.h"
 #include "ap_fixed.h"
 #include "hls_stream.h"
 #include "qop.h"
 #include <iostream>
 
-typedef struct v_in1024 { Dt data[Tsize]; } v_arr1024;
 typedef struct v_in128 { Dt data[Tsize/8]; } v_arr128;
 
+enum {
+	Bsize = Tsize/8,
+	BsizeP2 = Tp2-3, 
+};
 
 void
-onemath(Dt inV[Tsize], Dt W[Tsize], hls::stream<ap_axiu<Itsize,0,0,0> > &o_s)
+finalsum(
+	hls::stream<It > &i_s0,
+	hls::stream<It > &i_s1,
+	hls::stream<It > &i_s2,
+	hls::stream<It > &i_s3,
+	hls::stream<It > &i_s4,
+	hls::stream<It > &i_s5,
+	hls::stream<It > &i_s6,
+	hls::stream<It > &i_s7,
+	hls::stream<It > &o_s
+	)
 {
-	It imm[MopersP2+1+Qop_pathsP2][Mopers*Qop_paths];
-	#pragma HLS pipeline II=1 enable_flush
+	It s[8], o;
+	#pragma HLS array_partition variable=s dim=0
+	for(int iter=0; iter < Tsize*Veclen*Nmat; iter++) {
+		#pragma HLS pipeline II=1
+		i_s0.read(s[0]);
+		i_s1.read(s[1]);
+		i_s2.read(s[2]);
+		i_s3.read(s[3]);
+		i_s4.read(s[4]);
+		i_s5.read(s[5]);
+		i_s6.read(s[6]);
+		i_s7.read(s[7]);
+		o = s[0] + s[1] + s[2] + s[3] + s[4] + s[5] + s[6] + s[7];
+		o_s.write(o);
+	}
+}
+
+void
+onemath(It inV[Bsize], It W[Bsize], hls::stream<It > &o_s)
+{
+	It imm[BsizeP2+1][Bsize];
+	#pragma HLS pipeline II=1
 	#pragma HLS array_partition variable=imm dim=0
-//	#pragma HLS allocation instances=mul  limit=1024 operation
-	l1: for(int b = 0; b < Tsize; b++) {
+	l1: for(int b = 0; b < Bsize; b++) {
 		imm[0][b] = (Dt)(inV[b] * W[b]);
 	}
-	for(int s = 0; s < MopersP2+Qop_pathsP2; s++) {
-		for(int k = 0; k < (Tsize>>(s+1)); k++) {
-			imm[s+1][k] = imm[s][k] + imm[s][k+(Tsize>>(s+1))];
+	for(int s = 0; s < BsizeP2; s++) {
+		for(int k = 0; k < (Bsize>>(s+1)); k++) {
+			imm[s+1][k] = imm[s][k] + imm[s][k+(Bsize>>(s+1))];
 		}
 	}
-	ap_axiu<Itsize,0,0,0> o_s_v;
-	o_s_v.data(imm[0][0].width-1, 0) = imm[MopersP2+Qop_pathsP2][0](imm[0][0].width-1, 0);
-	o_s.write(o_s_v);
+	o_s.write(imm[BsizeP2][0]);
 }
 
 void
-fetchV(
-		hls::stream<v_arr1024 > &inV_s0,
-		Dt V[Tsize]
-	)
-{
-	v_arr1024 inV;
-	#pragma HLS array_partition variable=inV dim=1
-	#pragma HLS pipeline II=1
-	inV_s0.read(inV);
-	for(int i = 0; i < Tsize; i++) {
-		V[i] = inV.data[i];
-	}
-}
-
-void
-fetchW(
-		hls::stream<v_arr1024 > &inW_s0,
-		Dt W[Tsize]
-	)
-{
-	v_arr1024 inW;
-	#pragma HLS array_partition variable=inW dim=1
-	#pragma HLS pipeline II=1
-	inW_s0.read(inW);
-	for(int i = 0; i < Tsize; i++) {
-			W[i].range() = inW.data[i];
-	}
-}
-
-/* Collect 1024 */
-template <int lalala> void
 makeone(v_arr v[8],	v_arr128 &oW)
 {
 	#pragma HLS pipeline II=1
@@ -72,7 +70,23 @@ makeone(v_arr v[8],	v_arr128 &oW)
 	}	
 }
 
-template <int lalala> void
+void
+replicate (
+	hls::stream<v_arr128 > &i_s,
+	hls::stream<v_arr128 > &o_s
+	)
+{
+	v_arr128 v;
+	for(int iter=0; iter < Tsize*Nmat; iter++) {
+		#pragma HLS pipeline II=14
+		i_s.read(v);
+		for(int i=0; i < Veclen; i++) {
+			o_s.write(v);
+		}
+	}
+}
+
+void
 consume(
     const v_arr *inW,            // Read-Only Weights
 	hls::stream<v_arr128 > &oW_s
@@ -86,126 +100,103 @@ consume(
 	for(int iter=0; iter < Tsize*Nmat*Tsize/VDATA_SIZE/Mempaths; iter++) {
 		v[iter%8] = inW[iter];
 		if((iter%8) == 7) {
-			makeone<lalala>(v, oW);
+			makeone(v, oW);
 			oW_s.write(oW);
 		}
 	}
 }
 
-template <int lalala> void
-writeone(v_arr v[64], hls::stream<v_arr1024 > &o_s)
-{
-	v_arr1024 oW;
-	#pragma HLS array_partition variable=oW dim=0
-	#pragma HLS pipeline II=1
-	for(int i = 0; i < 64; i++) {
-		for(int q = 0; q < VDATA_SIZE; q++) {
-			oW.data[i*VDATA_SIZE+q].range() = v[i].data[q].range();
-		}
-	}	
-	o_s.write(oW);
-}
-
 void
 hbmV(
     const v_arr *inV,            // Read-Only Weights
-	hls::stream<v_arr1024 > &oV_s0
+	hls::stream<v_arr128 > &oV_s0,
+	hls::stream<v_arr128 > &oV_s1,
+	hls::stream<v_arr128 > &oV_s2,
+	hls::stream<v_arr128 > &oV_s3,
+	hls::stream<v_arr128 > &oV_s4,
+	hls::stream<v_arr128 > &oV_s5,
+	hls::stream<v_arr128 > &oV_s6,
+	hls::stream<v_arr128 > &oV_s7
 	)
 {
-	v_arr v[Veclen][64];
+	v_arr128 v[Veclen][8];
 	#pragma HLS array_partition variable=v dim=2
 	#pragma HLS array_partition variable=v dim=3
 
-	for(int i=0; i < 64; i++) {
-		#pragma HLS pipeline II=1
-		for(int q = 0; q < Veclen; q++) {
-			v[q][i] = inV[i*Veclen+q];
+	for(int q = 0; q < Veclen; q++) {
+		for(int i=0; i < 64; i++) {
+			#pragma HLS pipeline II=1
+			v_arr t;
+			t = inV[i+q*8*8];
+			for(int z=0; z < VDATA_SIZE; z++)
+				v[q][i>>3].data[(i%8)*16+z] = t.data[z];
 		}
 	}
 
 	for(int iter=0; iter < Tsize*Nmat; iter++) {
 		for(int q = 0; q < Veclen; q++) {
 			#pragma HLS pipeline II=1
-			writeone<0>(v[q], oV_s0);
+			oV_s0.write(v[q][0]);
+			oV_s1.write(v[q][1]);
+			oV_s2.write(v[q][2]);
+			oV_s3.write(v[q][3]);
+			oV_s4.write(v[q][4]);
+			oV_s5.write(v[q][5]);
+			oV_s6.write(v[q][6]);
+			oV_s7.write(v[q][7]);
 		}
 	}
-}
-
-void
-math(
-	hls::stream<v_arr1024 > &inV_s0,
-	hls::stream<v_arr1024 > &inW_s0,
-	hls::stream<ap_axiu<Itsize,0,0,0> > &o_s0
-)
-{
-	Dt V[Tsize], W[Tsize];
-	#pragma HLS array_partition variable=W dim=1
-	#pragma HLS array_partition variable=V dim=1
-	#pragma HLS pipeline enable_flush
-	fetchW(inW_s0, W);
-	fetchV(inV_s0, V);
-	onemath(V, W, o_s0);
 }
 
 void
 batchmath(
-	hls::stream<v_arr1024 > &inV_s0,
-	hls::stream<v_arr1024 > &inW_s0,
-	hls::stream<ap_axiu<Itsize,0,0,0> > &o_s0
+	hls::stream<v_arr128 > &inW_s0,
+	hls::stream<v_arr128 > &inV_s0,
+	hls::stream<It > &o_s0
 	)
 {
-	for(int i=0; i < Tsize*Veclen*Nmat; i++) {
-		math(inV_s0, inW_s0, o_s0);
+	v_arr128 V,W;
+	It bV[Bsize], bW[Bsize];
+	#pragma HLS array_partition variable=bV dim=0
+	#pragma HLS array_partition variable=bW dim=0
+	#pragma HLS array_partition variable=W dim=1
+	#pragma HLS array_partition variable=V dim=1
+	for(int i=0; i < Veclen*Tsize*Nmat; i++) {
+		#pragma HLS pipeline
+		inV_s0.read(V);
+		inW_s0.read(W);
+		for(int i = 0; i < Bsize; i++) {
+			bV[i] = V.data[i];
+			bW[i] = W.data[i];
+		}
+		onemath(bV, bW, o_s0);
 	}
 }
 
 void
-replicateW(
-	hls::stream<v_arr128 > &i_s0,
-	hls::stream<v_arr128 > &i_s1,
-	hls::stream<v_arr128 > &i_s2,
-	hls::stream<v_arr128 > &i_s3,
-	hls::stream<v_arr128 > &i_s4,
-	hls::stream<v_arr128 > &i_s5,
-	hls::stream<v_arr128 > &i_s6,
-	hls::stream<v_arr128 > &i_s7,
-	hls::stream<v_arr1024 > &o_s0
-	)
+wb(
+    int shift,
+	hls::stream<It > &i_s0,
+    wb_arr *o_tensor
+    )
 {
-	v_arr1024 v;
-	v_arr128 iv[8];
-
-	#pragma HLS array_partition variable=iv dim=0
-	#pragma HLS array_partition variable=v dim=0
-
-	for(int iter=0; iter < Tsize*Nmat; iter++) {
-		#pragma HLS pipeline II=1
-		i_s0.read(iv[0]);
-		i_s1.read(iv[1]);
-		i_s2.read(iv[2]);
-		i_s3.read(iv[3]);
-		i_s4.read(iv[4]);
-		i_s5.read(iv[5]);
-		i_s6.read(iv[6]);
-		i_s7.read(iv[7]);
-
-		for(int i = 0; i < 8; i++) {
-			for(int j = 0; j < Tsize/8; j++) {
-				v.data[i*Tsize/8+j] = iv[i].data[j];
-			}
+	It e;
+	wb_arr V;
+	#pragma HLS array_partition variable=V dim=0
+	l_a: for(int i=0; i < (Nmat*Tsize*Veclen)/VDATA_SIZE; i++) {
+		#pragma HLS pipeline II=16
+		for(int q=0; q < VDATA_SIZE; q++) {
+			i_s0.read(e);
+			V.data[q] = e >> shift;
 		}
-
-		for(int r=0; r < Veclen; r++) {
-			#pragma HLS pipeline II=1
-			o_s0.write(v);
-		}
+		o_tensor[i] = V;
 	}
 }
 
 extern "C" {
 void
 feeder(
-    const v_arr *inV,            // Read-Only Weights
+    const v_arr *inV,             // Read-Only Weights
     const v_arr *inW0,            // Read-Only Weights
     const v_arr *inW1,            // Read-Only Weights
     const v_arr *inW2,            // Read-Only Weights
@@ -214,7 +205,8 @@ feeder(
     const v_arr *inW5,            // Read-Only Weights
     const v_arr *inW6,            // Read-Only Weights
     const v_arr *inW7,            // Read-Only Weights
-    hls::stream<ap_axiu<Itsize,0,0,0> > &o_s0
+    wb_arr *o_tensor,
+    int shift
 )
 {
 	#pragma HLS INTERFACE m_axi port = inV offset = slave bundle = gmem16 max_read_burst_length=16 max_write_burst_length=128
@@ -226,6 +218,7 @@ feeder(
 	#pragma HLS INTERFACE m_axi port = inW5 offset = slave bundle = gmem5 max_read_burst_length=16 max_write_burst_length=128
 	#pragma HLS INTERFACE m_axi port = inW6 offset = slave bundle = gmem6 max_read_burst_length=16 max_write_burst_length=128
 	#pragma HLS INTERFACE m_axi port = inW7 offset = slave bundle = gmem7 max_read_burst_length=16 max_write_burst_length=128
+	#pragma HLS INTERFACE m_axi port = o_tensor offset=slave bundle = gmem17 max_read_burst_length=16 max_write_burst_length=128
 	#pragma HLS INTERFACE s_axilite bundle = control port = inV
 	#pragma HLS INTERFACE s_axilite bundle = control port = inW0
 	#pragma HLS INTERFACE s_axilite bundle = control port = inW1
@@ -235,13 +228,20 @@ feeder(
 	#pragma HLS INTERFACE s_axilite bundle = control port = inW5
 	#pragma HLS INTERFACE s_axilite bundle = control port = inW6
 	#pragma HLS INTERFACE s_axilite bundle = control port = inW7
+	#pragma HLS INTERFACE s_axilite bundle = control port = o_tensor
+	#pragma HLS INTERFACE s_axilite bundle = control port = shift
 	#pragma HLS INTERFACE s_axilite bundle = control port = return
-	#pragma HLS INTERFACE axis port=o_s0
 
 	#pragma HLS dataflow
 
-	static hls::stream<v_arr1024 > oV_s0;
-	static hls::stream<v_arr1024 > oW_sall;
+	static hls::stream<v_arr128 > oV_s0;
+	static hls::stream<v_arr128 > oV_s1;
+	static hls::stream<v_arr128 > oV_s2;
+	static hls::stream<v_arr128 > oV_s3;
+	static hls::stream<v_arr128 > oV_s4;
+	static hls::stream<v_arr128 > oV_s5;
+	static hls::stream<v_arr128 > oV_s6;
+	static hls::stream<v_arr128 > oV_s7;
 	static hls::stream<v_arr128 > oW_s0;
 	static hls::stream<v_arr128 > oW_s1;
 	static hls::stream<v_arr128 > oW_s2;
@@ -250,9 +250,32 @@ feeder(
 	static hls::stream<v_arr128 > oW_s5;
 	static hls::stream<v_arr128 > oW_s6;
 	static hls::stream<v_arr128 > oW_s7;
+	static hls::stream<v_arr128 > oWa_s0;
+	static hls::stream<v_arr128 > oWa_s1;
+	static hls::stream<v_arr128 > oWa_s2;
+	static hls::stream<v_arr128 > oWa_s3;
+	static hls::stream<v_arr128 > oWa_s4;
+	static hls::stream<v_arr128 > oWa_s5;
+	static hls::stream<v_arr128 > oWa_s6;
+	static hls::stream<v_arr128 > oWa_s7;
+	static hls::stream<It > o_i0;
+	static hls::stream<It > o_i1;
+	static hls::stream<It > o_i2;
+	static hls::stream<It > o_i3;
+	static hls::stream<It > o_i4;
+	static hls::stream<It > o_i5;
+	static hls::stream<It > o_i6;
+	static hls::stream<It > o_i7;
+	static hls::stream<It > o_wb;
 
-	#pragma HLS STREAM variable=oV_s0 depth=2	
-	#pragma HLS STREAM variable=oW_sall depth=2	
+	#pragma HLS STREAM variable=oV_s0 depth=3	
+	#pragma HLS STREAM variable=oV_s1 depth=3	
+	#pragma HLS STREAM variable=oV_s2 depth=3	
+	#pragma HLS STREAM variable=oV_s3 depth=3	
+	#pragma HLS STREAM variable=oV_s4 depth=3	
+	#pragma HLS STREAM variable=oV_s5 depth=3	
+	#pragma HLS STREAM variable=oV_s6 depth=3	
+	#pragma HLS STREAM variable=oV_s7 depth=3	
 	#pragma HLS STREAM variable=oW_s0 depth=2	
 	#pragma HLS STREAM variable=oW_s1 depth=2	
 	#pragma HLS STREAM variable=oW_s2 depth=2	
@@ -261,18 +284,51 @@ feeder(
 	#pragma HLS STREAM variable=oW_s5 depth=2	
 	#pragma HLS STREAM variable=oW_s6 depth=2	
 	#pragma HLS STREAM variable=oW_s7 depth=2	
+	#pragma HLS STREAM variable=oWa_s0 depth=2	
+	#pragma HLS STREAM variable=oWa_s1 depth=2	
+	#pragma HLS STREAM variable=oWa_s2 depth=2	
+	#pragma HLS STREAM variable=oWa_s3 depth=2	
+	#pragma HLS STREAM variable=oWa_s4 depth=2	
+	#pragma HLS STREAM variable=oWa_s5 depth=2	
+	#pragma HLS STREAM variable=oWa_s6 depth=2	
+	#pragma HLS STREAM variable=oWa_s7 depth=2	
+	#pragma HLS STREAM variable=o_i0 depth=2	
+	#pragma HLS STREAM variable=o_i1 depth=2	
+	#pragma HLS STREAM variable=o_i2 depth=2	
+	#pragma HLS STREAM variable=o_i3 depth=2	
+	#pragma HLS STREAM variable=o_i4 depth=2	
+	#pragma HLS STREAM variable=o_i5 depth=2	
+	#pragma HLS STREAM variable=o_i6 depth=2	
+	#pragma HLS STREAM variable=o_i7 depth=2	
+	#pragma HLS STREAM variable=o_wb depth=2	
 
-	consume<0>(inW0, oW_s0);
-	consume<1>(inW1, oW_s1);
-	consume<2>(inW2, oW_s2);
-	consume<3>(inW3, oW_s3);
-	consume<4>(inW4, oW_s4);
-	consume<5>(inW5, oW_s5);
-	consume<6>(inW6, oW_s6);
-	consume<7>(inW7, oW_s7);
-	hbmV(inV, oV_s0);
-	replicateW(oW_s0,oW_s1,oW_s2,oW_s3,oW_s4,oW_s5,oW_s6,oW_s7, oW_sall);
-	batchmath(oV_s0, oW_sall, o_s0);
+	hbmV(inV, oV_s0, oV_s1, oV_s2, oV_s3, oV_s4, oV_s5, oV_s6, oV_s7);
+	consume(inW0, oW_s0);
+	consume(inW1, oW_s1);
+	consume(inW2, oW_s2);
+	consume(inW3, oW_s3);
+	consume(inW4, oW_s4);
+	consume(inW5, oW_s5);
+	consume(inW6, oW_s6);
+	consume(inW7, oW_s7);
+	replicate(oW_s0, oWa_s0);
+	replicate(oW_s1, oWa_s1);
+	replicate(oW_s2, oWa_s2);
+	replicate(oW_s3, oWa_s3);
+	replicate(oW_s4, oWa_s4);
+	replicate(oW_s5, oWa_s5);
+	replicate(oW_s6, oWa_s6);
+	replicate(oW_s7, oWa_s7);
+	batchmath(oWa_s0, oV_s0, o_i0);
+	batchmath(oWa_s1, oV_s1, o_i1);
+	batchmath(oWa_s2, oV_s2, o_i2);
+	batchmath(oWa_s3, oV_s3, o_i3);
+	batchmath(oWa_s4, oV_s4, o_i4);
+	batchmath(oWa_s5, oV_s5, o_i5);
+	batchmath(oWa_s6, oV_s6, o_i6);
+	batchmath(oWa_s7, oV_s7, o_i7);
+	finalsum(o_i0, o_i1, o_i2, o_i3, o_i4, o_i5, o_i6, o_i7, o_wb);
+	wb(shift, o_wb, o_tensor);
 }
 
 } // extern C

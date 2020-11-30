@@ -100,7 +100,7 @@ BINARY_CONTAINERS += $(BUILD_DIR)/krnl_matmulbertl.xclbin
 #BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/control.xo
 #BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/controlw.xo
 #BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/qop.xo
-BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/wb.xo
+#BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/wb.xo
 #BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/softmax.xo
 BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/feeder.xo
 #BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/math.xo
@@ -127,9 +127,6 @@ $(TEMP_DIR)/feeder.xo: src/feeder.cpp
 $(TEMP_DIR)/softmax.xo: src/softmax.cpp
 	mkdir -p $(TEMP_DIR)
 	$(VPP) -c -k softmax $(CLFLAGS) --temp_dir $(TEMP_DIR)  -I'$(<D)' -o'$@' '$<'
-$(TEMP_DIR)/wb.xo: src/wb.cpp
-	mkdir -p $(TEMP_DIR)
-	$(VPP) -c -k wb $(CLFLAGS) --temp_dir $(TEMP_DIR)  -I'$(<D)' -o'$@' '$<'
 $(BUILD_DIR)/krnl_matmulbertl.xclbin: $(BINARY_CONTAINER_krnl_matmulbertl_OBJS)
 	mkdir -p $(BUILD_DIR)
 ifeq ($(HOST_ARCH), x86)

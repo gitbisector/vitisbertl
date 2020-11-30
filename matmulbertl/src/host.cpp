@@ -58,9 +58,8 @@ main(int argc, char *argv[]) {
 
   std::string binaryFile = argv[1];
   cl_int err;
-  cl::CommandQueue q[2];
+  cl::CommandQueue q;
   cl::Kernel krnl_feeder;
-  cl::Kernel krnl_wb;
   cl::Context context;
   std::vector<signed short, aligned_allocator<signed short>> source_w[Nk*Npk];
   std::vector<signed short, aligned_allocator<signed short>> source_v(sizeof(signed short)*14*1024);
@@ -98,12 +97,10 @@ main(int argc, char *argv[]) {
     auto device = devices[i];
     // Creating Context and Command Queue for selected Device
     OCL_CHECK(err, context = cl::Context(device, NULL, NULL, NULL, &err));
-    for(int i = 0; i < 2+Nk; i++) {
-      OCL_CHECK(err, q[i] = cl::CommandQueue(context, device,
+    OCL_CHECK(err, q = cl::CommandQueue(context, device,
                                         CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE |
                                             CL_QUEUE_PROFILING_ENABLE,
                                         &err));
-    }
     std::cout << "Trying to program device[" << i
               << "]: " << device.getInfo<CL_DEVICE_NAME>() << std::endl;
     cl::Program program(context, {device}, bins, NULL, &err);
@@ -116,10 +113,6 @@ main(int argc, char *argv[]) {
       std::string krnl_name_feeder = "feeder:{feeder_1}";
       printf("Creating a kernel [%s] for CU\n", krnl_name_feeder.c_str());
       OCL_CHECK(err, krnl_feeder = cl::Kernel(program, krnl_name_feeder.c_str(), &err));
-
-      std::string krnl_name_wb = "wb:{wb_1}";
-      printf("Creating a kernel [%s] for CU\n", krnl_name_wb.c_str());
-      OCL_CHECK(err, krnl_wb = cl::Kernel(program, krnl_name_wb.c_str(), &err));
       valid_device = true;
       break; // we break because we found a valid device
     }
@@ -143,7 +136,7 @@ main(int argc, char *argv[]) {
   for(int i = 0; i < Nk*Npk; i++) {
     inBufExtw[i].obj = source_w[i].data();
     inBufExtw[i].param = 0;
-    inBufExtw[i].flags = bank[2*i];
+    inBufExtw[i].flags = bank[4*i];
     if(is_sw_emulation)
       inBufExtw[i].flags = bank[0];
   }
@@ -169,23 +162,20 @@ main(int argc, char *argv[]) {
     OCL_CHECK(err, buffer_inputw[i] = cl::Buffer(
                       context, CL_MEM_READ_ONLY | CL_MEM_EXT_PTR_XILINX | CL_MEM_USE_HOST_PTR,
                       sizeof(signed short) * 3 * 1024 * 1024/Nk/Npk, &inBufExtw[i], &err));
-    OCL_CHECK(err, err = q[0].enqueueMigrateMemObjects({buffer_inputw[i]}, 0 /* 0 means from host*/));
+    OCL_CHECK(err, err = q.enqueueMigrateMemObjects({buffer_inputw[i]}, 0 /* 0 means from host*/));
   }
   OCL_CHECK(err, buffer_inputv[0] = cl::Buffer(
                       context, CL_MEM_READ_ONLY | CL_MEM_EXT_PTR_XILINX | CL_MEM_USE_HOST_PTR,
                       sizeof(signed short) * 1024 * 14, &inBufExtv[0], &err));
-  OCL_CHECK(err, err = q[0].enqueueMigrateMemObjects({buffer_inputv[0]}, 0 /* 0 means from host*/));
+  OCL_CHECK(err, err = q.enqueueMigrateMemObjects({buffer_inputv[0]}, 0 /* 0 means from host*/));
 
   OCL_CHECK(err, buffer_output_wb[0] = cl::Buffer(
                       context, CL_MEM_WRITE_ONLY | CL_MEM_EXT_PTR_XILINX | CL_MEM_USE_HOST_PTR,
                       sizeof(int) * 3 * 1024 * 14, &outBufExtwb[0], &err));
-  OCL_CHECK(err, err = q[0].enqueueMigrateMemObjects({buffer_output_wb[0]}, 0 /* 0 means from host*/));
+  OCL_CHECK(err, err = q.enqueueMigrateMemObjects({buffer_output_wb[0]}, 0 /* 0 means from host*/));
   // Copy input data to Device Global Memory
-  q[0].finish();
+  q.finish();
 
-  int outshiftscale = 0;
-  OCL_CHECK(err, err = krnl_wb.setArg(0, buffer_output_wb[0]));
-  OCL_CHECK(err, err = krnl_wb.setArg(1, outshiftscale));
 
   double kernel_time_in_sec = 0;
   std::chrono::duration<double> kernel_time(0);
@@ -197,22 +187,22 @@ main(int argc, char *argv[]) {
       OCL_CHECK(err, err = krnl_feeder.setArg(1+i*Npk+j, buffer_inputw[i*Npk+j]));
     }
   }
+  int outshiftscale = 0;
+  OCL_CHECK(err, err = krnl_feeder.setArg(9, buffer_output_wb[0]));
+  OCL_CHECK(err, err = krnl_feeder.setArg(10, outshiftscale));
 
   // Invoking the kernel
-  OCL_CHECK(err, err = q[0].enqueueTask(krnl_feeder));
-  OCL_CHECK(err, err = q[1].enqueueTask(krnl_wb));
-  q[0].finish();
-  std::cout << "q[0] finished" << std::endl;
-  q[1].finish();
-  std::cout << "q[1] finished" << std::endl;
+  OCL_CHECK(err, err = q.enqueueTask(krnl_feeder));
+  q.finish();
+  std::cout << "q finished" << std::endl;
 
   auto kernel_end = std::chrono::high_resolution_clock::now();
   kernel_time = std::chrono::duration<double>(kernel_end - kernel_start);
   kernel_time_in_sec = kernel_time.count();
 
   // Copy Result from Device Global Memory to Host Local Memory
-  OCL_CHECK(err, err = q[0].enqueueMigrateMemObjects({buffer_output_wb[0]}, CL_MIGRATE_MEM_OBJECT_HOST));
-  q[0].finish();
+  OCL_CHECK(err, err = q.enqueueMigrateMemObjects({buffer_output_wb[0]}, CL_MIGRATE_MEM_OBJECT_HOST));
+  q.finish();
   std::cout << "readback finished" << std::endl;
 
   std::cout << "kernel time = " << (kernel_time_in_sec*1000000) << " us" << std::endl;
