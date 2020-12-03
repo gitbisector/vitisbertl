@@ -42,8 +42,10 @@ enum {
 
 int swres[Wr][Vc];
 
+typedef char Dt;
+
 void
-swmatmul(std::vector<signed short, aligned_allocator<signed short> > &W, std::vector<signed short, aligned_allocator<signed short> >&V)
+swmatmul(std::vector<Dt, aligned_allocator<Dt> > &W, std::vector<Dt, aligned_allocator<Dt> >&V)
 {
   memset(swres, 0, sizeof(swres));
   for(int r = 0; r < Wr; r++)
@@ -73,12 +75,12 @@ main(int argc, char *argv[]) {
   cl::CommandQueue q;
   cl::Kernel krnl_feeder;
   cl::Context context;
-  std::vector<signed short, aligned_allocator<signed short>> source_w[Npk];
-  std::vector<signed short, aligned_allocator<signed short>> source_v(sizeof(signed short)*14*1024);
+  std::vector<Dt, aligned_allocator<Dt>> source_w[Npk];
+  std::vector<Dt, aligned_allocator<Dt>> source_v(sizeof(Dt)*14*1024);
   std::vector<int, aligned_allocator<int>> source_hw_wb_results(sizeof(int)*3*14*1024);
 
   for(int i = 0; i < Npk; i++) {
-    source_w[i].resize(sizeof(signed short)*3*1024*1024/Npk);
+    source_w[i].resize(sizeof(Dt)*3*1024*1024/Npk);
   }
 
   // Create the test data
@@ -87,11 +89,11 @@ main(int argc, char *argv[]) {
     //std::generate(source_w[i].begin(), source_w[i].end(), std::rand);
   }
 
-  std::fill(source_v.begin(), source_v.end(), 18000);
+  std::fill(source_v.begin(), source_v.end(), 8);
   //std::generate(source_v.begin(), source_v.end(), std::rand);
 
-  source_w[0][10] = 32000;
-  source_w[0][1024+11] = 16000;
+  source_w[0][10] = 5;
+  source_w[0][1024+11] = 7;
 
   // Initializing output vectors to zero
   std::fill(source_hw_wb_results.begin(), source_hw_wb_results.end(), 0);
@@ -174,12 +176,12 @@ main(int argc, char *argv[]) {
   for(int i = 0; i < Npk; i++) {
     OCL_CHECK(err, buffer_inputw[i] = cl::Buffer(
                       context, CL_MEM_READ_ONLY | CL_MEM_EXT_PTR_XILINX | CL_MEM_USE_HOST_PTR,
-                      sizeof(signed short) * 3 * 1024 * 1024/Npk, &inBufExtw[i], &err));
+                      sizeof(Dt) * 3 * 1024 * 1024/Npk, &inBufExtw[i], &err));
     OCL_CHECK(err, err = q.enqueueMigrateMemObjects({buffer_inputw[i]}, 0 /* 0 means from host*/));
   }
   OCL_CHECK(err, buffer_inputv[0] = cl::Buffer(
                       context, CL_MEM_READ_ONLY | CL_MEM_EXT_PTR_XILINX | CL_MEM_USE_HOST_PTR,
-                      sizeof(signed short) * 1024 * 14, &inBufExtv[0], &err));
+                      sizeof(Dt) * 1024 * 14, &inBufExtv[0], &err));
   OCL_CHECK(err, err = q.enqueueMigrateMemObjects({buffer_inputv[0]}, 0 /* 0 means from host*/));
 
   OCL_CHECK(err, buffer_output_wb[0] = cl::Buffer(

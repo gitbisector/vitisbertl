@@ -1,7 +1,7 @@
 #define VDATA_SIZE 16
 #define VDATA_SIZEP2 4
 
-typedef ap_int<16> Dt;
+typedef ap_int<8> Dt;
 
 #define Itsize 32
 typedef ap_int<32> It;
