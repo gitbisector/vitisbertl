@@ -49,7 +49,7 @@ onemath(It inV[Bsize], It W[Bsize], hls::stream<It > &o_s)
 	#pragma HLS pipeline II=1
 	#pragma HLS array_partition variable=imm dim=0
 	l1: for(int b = 0; b < Bsize; b++) {
-		imm[0][b] = (Dt)(inV[b] * W[b]);
+		imm[0][b] = inV[b] * W[b];
 	}
 	for(int s = 0; s < BsizeP2; s++) {
 		for(int k = 0; k < (Bsize>>(s+1)); k++) {

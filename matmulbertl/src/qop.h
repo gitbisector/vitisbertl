@@ -1,10 +1,10 @@
 #define VDATA_SIZE 16
 #define VDATA_SIZEP2 4
 
-typedef ap_fixed<16, 0> Dt;
+typedef ap_int<16> Dt;
 
 #define Itsize 32
-typedef ap_fixed<32, 16> It;
+typedef ap_int<32> It;
 
 typedef struct v_datatype { Dt data[VDATA_SIZE]; } v_dt;
 typedef struct v_inWrrtype{	Dt data[VDATA_SIZE]; } v_arr;

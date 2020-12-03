@@ -19,13 +19,25 @@ const int bank[MAX_HBM_BANKCOUNT] = {
     BANK_NAME(25), BANK_NAME(26), BANK_NAME(27), BANK_NAME(28), BANK_NAME(29),
     BANK_NAME(30), BANK_NAME(31)};
 
+const int map[8] = {
+  BANK_NAME(0),
+  BANK_NAME(4),
+  BANK_NAME(8),
+  BANK_NAME(12),
+  BANK_NAME(16),
+  BANK_NAME(20),
+  BANK_NAME(24),
+  BANK_NAME(26)
+};
+
+
 enum {
-  Nk = 1,
   Npk = 8,
   Wr = 3*1024,
   Wc = 1024,
   Vr = 1024,
   Vc = 14,
+  Niter= 1,
 };
 
 int swres[Wr][Vc];
@@ -61,16 +73,16 @@ main(int argc, char *argv[]) {
   cl::CommandQueue q;
   cl::Kernel krnl_feeder;
   cl::Context context;
-  std::vector<signed short, aligned_allocator<signed short>> source_w[Nk*Npk];
+  std::vector<signed short, aligned_allocator<signed short>> source_w[Npk];
   std::vector<signed short, aligned_allocator<signed short>> source_v(sizeof(signed short)*14*1024);
   std::vector<int, aligned_allocator<int>> source_hw_wb_results(sizeof(int)*3*14*1024);
 
-  for(int i = 0; i < Nk*Npk; i++) {
-    source_w[i].resize(sizeof(signed short)*3*1024*1024/Nk/Npk);
+  for(int i = 0; i < Npk; i++) {
+    source_w[i].resize(sizeof(signed short)*3*1024*1024/Npk);
   }
 
   // Create the test data
-  for(int i = 0; i < Nk*Npk; i++) {
+  for(int i = 0; i < Npk; i++) {
     std::fill(source_w[i].begin(), source_w[i].end(), 0);
     //std::generate(source_w[i].begin(), source_w[i].end(), std::rand);
   }
@@ -122,46 +134,47 @@ main(int argc, char *argv[]) {
     exit(EXIT_FAILURE);
   }
 
-  std::vector<cl_mem_ext_ptr_t> inBufExtw(Nk*Npk);
+  std::vector<cl_mem_ext_ptr_t> inBufExtw(Npk);
   std::vector<cl_mem_ext_ptr_t> inBufExtv(1);
   std::vector<cl_mem_ext_ptr_t> outBufExtwb(1);
 
-  std::vector<cl::Buffer> buffer_inputw(Nk*Npk);
+  std::vector<cl::Buffer> buffer_inputw(Npk);
   std::vector<cl::Buffer> buffer_inputv(1);
   std::vector<cl::Buffer> buffer_output_wb(1);
 
   // For Allocating Buffer to specific Global Memory Bank, user has to use
   // cl_mem_ext_ptr_t
   // and provide the Banks
-  for(int i = 0; i < Nk*Npk; i++) {
+  for(int i = 0; i < Npk; i++) {
     inBufExtw[i].obj = source_w[i].data();
     inBufExtw[i].param = 0;
-    inBufExtw[i].flags = bank[4*i];
+    inBufExtw[i].flags = map[i];
     if(is_sw_emulation)
       inBufExtw[i].flags = bank[0];
   }
 
   inBufExtv[0].obj = source_v.data();
   inBufExtv[0].param = 0;
-  inBufExtv[0].flags = bank[31];
+  inBufExtv[0].flags = bank[14];
   if(is_sw_emulation) {
     inBufExtv[0].flags = bank[0];
   }
 
   outBufExtwb[0].obj = source_hw_wb_results.data();
   outBufExtwb[0].param = 0;
-  outBufExtwb[0].flags = bank[31];
+  outBufExtwb[0].flags = bank[14];
   if(is_sw_emulation) {
     outBufExtwb[0].flags = bank[0];
   }
 
+
   // These commands will allocate memory on the FPGA and copy the data across
   // The cl::Buffer objects can be used to reference the memory locations on the device.
   // The Weights are spread across Nk even-numbered HBM banks and vector lives in bank 31.
-  for(int i = 0; i < Nk*Npk; i++) {
+  for(int i = 0; i < Npk; i++) {
     OCL_CHECK(err, buffer_inputw[i] = cl::Buffer(
                       context, CL_MEM_READ_ONLY | CL_MEM_EXT_PTR_XILINX | CL_MEM_USE_HOST_PTR,
-                      sizeof(signed short) * 3 * 1024 * 1024/Nk/Npk, &inBufExtw[i], &err));
+                      sizeof(signed short) * 3 * 1024 * 1024/Npk, &inBufExtw[i], &err));
     OCL_CHECK(err, err = q.enqueueMigrateMemObjects({buffer_inputw[i]}, 0 /* 0 means from host*/));
   }
   OCL_CHECK(err, buffer_inputv[0] = cl::Buffer(
@@ -177,23 +190,23 @@ main(int argc, char *argv[]) {
   q.finish();
 
 
+    // Setting the feeder Arguments
+    OCL_CHECK(err, err = krnl_feeder.setArg(0, buffer_inputv[0]));
+    for(int j = 0; j < Npk; j++) {
+      OCL_CHECK(err, err = krnl_feeder.setArg(1+j, buffer_inputw[j]));
+    }
+    int outshiftscale = 0;
+    OCL_CHECK(err, err = krnl_feeder.setArg(9, buffer_output_wb[0]));
+    OCL_CHECK(err, err = krnl_feeder.setArg(10, outshiftscale));
+
   double kernel_time_in_sec = 0;
   std::chrono::duration<double> kernel_time(0);
   auto kernel_start = std::chrono::high_resolution_clock::now();
-  // Setting the feeder Arguments
-  OCL_CHECK(err, err = krnl_feeder.setArg(0, buffer_inputv[0]));
-  for(int i = 0; i < Nk; i++) {
-    for(int j = 0; j < Npk; j++) {
-      OCL_CHECK(err, err = krnl_feeder.setArg(1+i*Npk+j, buffer_inputw[i*Npk+j]));
-    }
+  for(int iter=0; iter<Niter; iter++) {
+    // Invoking the kernel
+    OCL_CHECK(err, err = q.enqueueTask(krnl_feeder));
+    q.finish();
   }
-  int outshiftscale = 0;
-  OCL_CHECK(err, err = krnl_feeder.setArg(9, buffer_output_wb[0]));
-  OCL_CHECK(err, err = krnl_feeder.setArg(10, outshiftscale));
-
-  // Invoking the kernel
-  OCL_CHECK(err, err = q.enqueueTask(krnl_feeder));
-  q.finish();
   std::cout << "q finished" << std::endl;
 
   auto kernel_end = std::chrono::high_resolution_clock::now();
@@ -205,7 +218,7 @@ main(int argc, char *argv[]) {
   q.finish();
   std::cout << "readback finished" << std::endl;
 
-  std::cout << "kernel time = " << (kernel_time_in_sec*1000000) << " us" << std::endl;
+  std::cout << "kernel time = " << (kernel_time_in_sec/Niter*1000000) << " us" << std::endl;
   // OPENCL HOST CODE AREA ENDS
 
   for(int i=0; i < Wr*Vc; i++) {
