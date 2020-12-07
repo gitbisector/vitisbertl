@@ -16,8 +16,8 @@ enum {
 	Mopers = VDATA_SIZE * 8,
 	MopersP2 = 7,
 	Tsize = 1<<Tp2,             /* 1024 */
-	Nmat = 3,
-	Veclen = 14,
+	Nmat = 8,
+	Veclen = 1024,		/* Maximum vector length, needs BRAMs */
 
 	Mempaths = 8,
 	Qop_paths = 8,

@@ -199,7 +199,9 @@ main(int argc, char *argv[]) {
     }
     int outshiftscale = 0;
     OCL_CHECK(err, err = krnl_feeder.setArg(9, buffer_output_wb[0]));
-    OCL_CHECK(err, err = krnl_feeder.setArg(10, outshiftscale));
+    OCL_CHECK(err, err = krnl_feeder.setArg(10, (char)3));
+    OCL_CHECK(err, err = krnl_feeder.setArg(11, (char)14));
+    OCL_CHECK(err, err = krnl_feeder.setArg(12, outshiftscale));
 
   double kernel_time_in_sec = 0;
   std::chrono::duration<double> kernel_time(0);
