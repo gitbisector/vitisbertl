@@ -1,9 +1,10 @@
 #define VDATA_SIZE 16
+#define VDATA_SIZEP2 4
 
-typedef ap_fixed<16, 0> Dt;
+typedef ap_int<8> Dt;
 
 #define Itsize 32
-typedef ap_fixed<32, 16> It;
+typedef ap_int<32> It;
 
 typedef struct v_datatype { Dt data[VDATA_SIZE]; } v_dt;
 typedef struct v_inWrrtype{	Dt data[VDATA_SIZE]; } v_arr;
@@ -15,7 +16,10 @@ enum {
 	Mopers = VDATA_SIZE * 8,
 	MopersP2 = 7,
 	Tsize = 1<<Tp2,             /* 1024 */
-	Nmat = 3,
-	Veclen = 14,
-};
+	Nmat = 8,
+	Veclen = 1024,		/* Maximum vector length, needs BRAMs */
 
+	Mempaths = 8,
+	Qop_paths = 8,
+	Qop_pathsP2 = 3,
+};

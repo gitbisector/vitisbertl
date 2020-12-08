@@ -60,6 +60,8 @@ RESULT_STRING = TEST PASSED
 VPP := v++
 SDCARD := sd_card
 
+CXXFLAGS += -DAP_INT_MAX_W=16384
+
 include $(ABS_COMMON_REPO)/common/includes/opencl/opencl.mk
 CXXFLAGS += $(opencl_CXXFLAGS) -Wall -O0 -g -std=c++11
 LDFLAGS += $(opencl_LDFLAGS)
@@ -78,6 +80,7 @@ endif
 
 ############################## Setting up Kernel Variables ##############################
 # Kernel compiler global settings
+CLFLAGS += -DAP_INT_MAX_W=16384
 CLFLAGS += -t $(TARGET) --platform $(DEVICE) --save-temps 
 ifneq ($(TARGET), hw)
 	CLFLAGS += -g
@@ -94,10 +97,13 @@ EMU_DIR = $(SDCARD)/data/emulation
 
 ############################## Declaring Binary Containers ##############################
 BINARY_CONTAINERS += $(BUILD_DIR)/krnl_matmulbertl.xclbin
-BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/control.xo
-BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/qop.xo
-BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/wb.xo
+#BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/control.xo
+#BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/controlw.xo
+#BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/qop.xo
+#BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/wb.xo
 #BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/softmax.xo
+BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/feeder.xo
+#BINARY_CONTAINER_krnl_matmulbertl_OBJS += $(TEMP_DIR)/math.xo
 
 ############################## Setting Targets ##############################
 CP = cp -rf
@@ -115,30 +121,12 @@ build: check-vitis $(BINARY_CONTAINERS)
 xclbin: build
 
 ############################## Setting Rules for Binary Containers (Building Kernels) ##############################
+$(TEMP_DIR)/feeder.xo: src/feeder.cpp
+	mkdir -p $(TEMP_DIR)
+	$(VPP) -c -k feeder $(CLFLAGS) --temp_dir $(TEMP_DIR)  -I'$(<D)' -o'$@' '$<'
 $(TEMP_DIR)/softmax.xo: src/softmax.cpp
 	mkdir -p $(TEMP_DIR)
 	$(VPP) -c -k softmax $(CLFLAGS) --temp_dir $(TEMP_DIR)  -I'$(<D)' -o'$@' '$<'
-$(TEMP_DIR)/control.xo: src/control.cpp
-	mkdir -p $(TEMP_DIR)
-	$(VPP) -c -k control $(CLFLAGS) --temp_dir $(TEMP_DIR)  -I'$(<D)' -o'$@' '$<'
-$(TEMP_DIR)/add4t.xo: src/addt4.cpp
-	mkdir -p $(TEMP_DIR)
-	$(VPP) -c -k addt4 $(CLFLAGS) --temp_dir $(TEMP_DIR)  -I'$(<D)' -o'$@' '$<'
-$(TEMP_DIR)/add16t.xo: src/addt16.cpp
-	mkdir -p $(TEMP_DIR)
-	$(VPP) -c -k addt16 $(CLFLAGS) --temp_dir $(TEMP_DIR)  -I'$(<D)' -o'$@' '$<'
-$(TEMP_DIR)/qop.xo: src/qop.cpp
-	mkdir -p $(TEMP_DIR)
-	$(VPP) -c -k qop $(CLFLAGS) --kernel_frequency 400 --temp_dir $(TEMP_DIR)  -I'$(<D)' -o'$@' '$<'
-$(TEMP_DIR)/wb.xo: src/wb.cpp
-	mkdir -p $(TEMP_DIR)
-	$(VPP) -c -k wb $(CLFLAGS) --temp_dir $(TEMP_DIR)  -I'$(<D)' -o'$@' '$<'
-$(TEMP_DIR)/mux4.xo: src/mux4.cpp
-	mkdir -p $(TEMP_DIR)
-	$(VPP) -c -k mux4 $(CLFLAGS) --temp_dir $(TEMP_DIR)  -I'$(<D)' -o'$@' '$<'
-$(TEMP_DIR)/mux8.xo: src/mux8.cpp
-	mkdir -p $(TEMP_DIR)
-	$(VPP) -c -k mux8 $(CLFLAGS) --temp_dir $(TEMP_DIR)  -I'$(<D)' -o'$@' '$<'
 $(BUILD_DIR)/krnl_matmulbertl.xclbin: $(BINARY_CONTAINER_krnl_matmulbertl_OBJS)
 	mkdir -p $(BUILD_DIR)
 ifeq ($(HOST_ARCH), x86)
