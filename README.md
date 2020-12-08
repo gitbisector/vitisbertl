@@ -1,5 +1,5 @@
 # vitisbertl
-experiments for low latency BERT large inference on Alveo
+experiments for low latency BERT large inference on Alveo U50.
 
 vitis_hls C++ code module called "feeder" is a matrix multiplication kernel with 1024 parallel DSPs.
 
